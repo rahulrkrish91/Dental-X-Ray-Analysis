@@ -198,11 +198,26 @@ export async function runAnalysisPipeline(
 
     metrics.flagsCount = validatedVision.flags.length;
 
+    // Limit findings to 10 (ClinicalReportSchema max) - prioritize by confidence then severity
+    const limitedFindings = validatedVision.data.findings
+      .sort((a, b) => {
+        const severityOrder = { severe: 3, moderate: 2, mild: 1 };
+        const sevDiff = severityOrder[b.severity] - severityOrder[a.severity];
+        if (sevDiff !== 0) return sevDiff;
+        return b.confidence - a.confidence;
+      })
+      .slice(0, 10);
+
+    const limitedVisionData = {
+      ...validatedVision.data,
+      findings: limitedFindings
+    };
+
     // Stage 5: Generate Clinical Report
     stageStart(PipelineStage.REASONING_REPORT);
     const reasoningClient = getReasoningClient();
     const clinicalReport = await reasoningClient.generateReport(
-      validatedVision.data,
+      limitedVisionData,
       validatedVision.flags,
       validatedRequest.language
     );
