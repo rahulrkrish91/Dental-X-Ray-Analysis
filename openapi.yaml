@@ -1,0 +1,629 @@
+openapi: 3.0.3
+info:
+  title: Dental X-Ray AI Analysis API
+  version: 1.0.0
+  description: |
+    Preliminary AI-generated dental X-ray insights.
+    **Not a medical diagnosis.** Results require dentist review.
+  contact:
+    name: Dental AI Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+  - url: https://api.dentalxray.example.com
+    description: Production server
+
+tags:
+  - name: Analysis
+    description: Dental X-ray analysis endpoints
+  - name: Q&A
+    description: Follow-up questions about analysis reports
+  - name: Health
+    description: System health and configuration
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: System health check
+      description: Returns status of all system components including AI models
+      responses:
+        '200':
+          description: Healthy or degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheck'
+        '503':
+          description: Unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheck'
+
+  /api/config:
+    get:
+      tags: [Health]
+      summary: Get public configuration
+      responses:
+        '200':
+          description: Public configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clinicWhatsapp:
+                    type: string
+                    nullable: true
+
+  /api/analyze:
+    post:
+      tags: [Analysis]
+      summary: Analyze dental X-ray image
+      description: |
+        Upload a dental X-ray image for AI analysis.
+        Returns structured findings and a patient-friendly clinical report.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Dental X-ray image (JPEG, PNG, WebP, HEIC - max 10MB)
+                xrayType:
+                  type: string
+                  enum: [bitewing, periapical, opg, unknown]
+                  default: unknown
+                  description: X-ray type hint
+                symptoms:
+                  type: string
+                  description: JSON array of symptoms (pain, swelling, fever, injury, recent injury, bleeding)
+                lang:
+                  type: string
+                  enum: [en, ml]
+                  default: en
+                  description: Response language
+      responses:
+        '200':
+          description: Analysis successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResponse'
+        '400':
+          description: Invalid request (bad image, missing file)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: File too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Analysis failed (upstream model error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/ask:
+    post:
+      tags: [Q&A]
+      summary: Ask follow-up question about analysis report
+      description: |
+        Ask a question about a previously generated report.
+        Requires a valid report_token from the analysis response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, question, language]
+              properties:
+                token:
+                  type: string
+                  description: Signed report token from analysis response
+                question:
+                  type: string
+                  minLength: 3
+                  maxLength: 300
+                  description: Patient question
+                language:
+                  type: string
+                  enum: [en, ml]
+                  description: Response language
+                history:
+                  type: array
+                  maxItems: 3
+                  items:
+                    type: object
+                    required: [q, a]
+                    properties:
+                      q:
+                        type: string
+                        maxLength: 300
+                      a:
+                        type: string
+                        maxLength: 1200
+                  description: Previous Q&A turns
+      responses:
+        '200':
+          description: Answer generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AskResponse'
+        '400':
+          description: Invalid request (bad token, question too short/long)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited (per-hour or daily cap)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to get answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Q&A unavailable (disabled or not configured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    # ===== Request/Response =====
+    AnalysisRequest:
+      type: object
+      required: [image_base64]
+      properties:
+        image_base64:
+          type: string
+          format: base64
+        mime_type:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+          default: image/jpeg
+        xray_type_hint:
+          type: string
+          enum: [bitewing, periapical, opg, unknown]
+        symptoms:
+          type: array
+          items:
+            type: string
+            enum: [pain, swelling, fever, injury, recent injury, bleeding]
+          maxItems: 5
+        language:
+          type: string
+          enum: [en, ml]
+          default: en
+        patient_id:
+          type: string
+        request_id:
+          type: string
+          format: uuid
+
+    AnalysisResponse:
+      type: object
+      required: [success, request_id]
+      properties:
+        success:
+          type: boolean
+        report:
+          $ref: '#/components/schemas/ClinicalReport'
+          nullable: true
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+          nullable: true
+        request_id:
+          type: string
+          format: uuid
+
+    AskResponse:
+      type: object
+      required: [answer, suggest_dentist, remaining, report_token]
+      properties:
+        answer:
+          type: string
+        suggest_dentist:
+          type: boolean
+        urgent:
+          type: boolean
+        out_of_scope:
+          type: boolean
+        remaining:
+          type: integer
+          minimum: 0
+          maximum: 4
+        report_token:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [INVALID_IMAGE, IMAGE_TOO_LARGE, IMAGE_TOO_SMALL, IMAGE_DIMENSIONS_EXCEEDED, CONFIG_MISSING, AUTH_FAILED, RATE_LIMITED, MODEL_UNAVAILABLE, TIMEOUT, MODEL_OUTPUT_INVALID, EMPTY_MODEL_RESPONSE, INTERNAL_ERROR]
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    # ===== Clinical Report =====
+    ClinicalReport:
+      type: object
+      required: [is_dental_xray, rejection_reason, xray_type, image_quality, summary, healthy_observations, findings, recommended_next_steps, limitations, disclaimer, dentist_review_flags]
+      properties:
+        is_dental_xray:
+          type: boolean
+        rejection_reason:
+          type: string
+          nullable: true
+        xray_type:
+          type: string
+          enum: [bitewing, periapical, opg, unknown]
+        image_quality:
+          type: object
+          required: [rating, issues, usable]
+          properties:
+            rating:
+              type: string
+              enum: [good, fair, poor]
+            issues:
+              type: array
+              items:
+                type: string
+            usable:
+              type: boolean
+        summary:
+          type: string
+          maxLength: 500
+        healthy_observations:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+        findings:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/ClinicalFinding'
+        recommended_next_steps:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+        limitations:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+        disclaimer:
+          type: string
+        dentist_review_flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationFlag'
+        report_token:
+          type: string
+        metadata:
+          type: object
+          properties:
+            vision_model:
+              type: string
+            reasoning_model:
+              type: string
+            total_processing_time_ms:
+              type: integer
+              minimum: 0
+            vision_confidence_avg:
+              type: number
+              minimum: 0
+              maximum: 1
+
+    ClinicalFinding:
+      type: object
+      required: [id, label, tooth_fdi, location_description, explanation_plain, confidence, urgency, bbox]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        tooth_fdi:
+          type: string
+          pattern: '^(?:[1-4][1-8]|[5-8][1-5])$'
+          nullable: true
+        location_description:
+          type: string
+        explanation_plain:
+          type: string
+        confidence:
+          type: string
+          enum: [low, medium, high]
+        urgency:
+          type: string
+          enum: [routine, soon, urgent]
+        bbox:
+          $ref: '#/components/schemas/BBox'
+          nullable: true
+
+    ValidationFlag:
+      type: object
+      required: [code, severity, message]
+      properties:
+        code:
+          type: string
+        severity:
+          type: string
+          enum: [info, warning, critical]
+        message:
+          type: string
+        finding_index:
+          type: integer
+          nullable: true
+        tooth_fdi:
+          type: string
+          pattern: '^(?:[1-4][1-8]|[5-8][1-5])$'
+          nullable: true
+
+    BBox:
+      type: object
+      required: [x, y, w, h]
+      properties:
+        x:
+          type: number
+          minimum: 0
+          maximum: 1
+        y:
+          type: number
+          minimum: 0
+          maximum: 1
+        w:
+          type: number
+          minimum: 0
+          maximum: 1
+        h:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    # ===== Health =====
+    HealthCheck:
+      type: object
+      required: [status, timestamp, version, models, checks]
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+        models:
+          type: object
+          required: [vision, reasoning]
+          properties:
+            vision:
+              type: object
+              required: [available]
+              properties:
+                available:
+                  type: boolean
+                latency_ms:
+                  type: integer
+            reasoning:
+              type: object
+              required: [available]
+              properties:
+                available:
+                  type: boolean
+                latency_ms:
+                  type: integer
+        checks:
+          type: array
+          items:
+            type: object
+            required: [name, status]
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+                enum: [pass, fail, warn]
+              message:
+                type: string
+
+    # ===== Vision Output (internal) =====
+    VisionOutput:
+      type: object
+      required: [image_quality, teeth_present, teeth_missing, findings, periodontal, restorations, other_observations]
+      properties:
+        image_quality:
+          type: object
+          required: [adequate, rating, issues]
+          properties:
+            adequate:
+              type: boolean
+            rating:
+              type: string
+              enum: [good, fair, poor]
+            issues:
+              type: array
+              items:
+                type: string
+            sharpness_score:
+              type: number
+              minimum: 0
+              maximum: 100
+            contrast_score:
+              type: number
+              minimum: 0
+              maximum: 100
+            exposure_score:
+              type: number
+              minimum: 0
+              maximum: 100
+        teeth_present:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 48
+        teeth_missing:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 48
+        findings:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/VisionFinding'
+        periodontal:
+          type: object
+          required: [bone_loss, teeth_affected]
+          properties:
+            bone_loss:
+              type: string
+              enum: [none, mild, moderate, severe]
+            teeth_affected:
+              type: array
+              items:
+                type: integer
+                minimum: 1
+                maximum: 48
+            description:
+              type: string
+              maxLength: 500
+        restorations:
+          type: array
+          items:
+            type: object
+            required: [tooth_fdi, type]
+            properties:
+              tooth_fdi:
+                type: string
+                pattern: '^(?:[1-4][1-8]|[5-8][1-5])$'
+              type:
+                type: string
+                enum: [filling, crown, bridge, implant, root_canal, ortho]
+              condition:
+                type: string
+                enum: [intact, defective, recurrent_caries]
+        other_observations:
+          type: array
+          items:
+            type: string
+        processing_metadata:
+          type: object
+          properties:
+            model:
+              type: string
+            processing_time_ms:
+              type: integer
+              minimum: 0
+            tokens_used:
+              type: integer
+              minimum: 0
+
+    VisionFinding:
+      type: object
+      required: [tooth, tooth_fdi, surfaces, pathology, severity, confidence, description]
+      properties:
+        tooth:
+          type: integer
+          minimum: 1
+          maximum: 48
+          nullable: true
+        tooth_fdi:
+          type: string
+          pattern: '^(?:[1-4][1-8]|[5-8][1-5])$'
+          nullable: true
+        surfaces:
+          type: array
+          items:
+            type: string
+            enum: [M, D, O, B, L, I, C]
+        pathology:
+          type: string
+          enum: [caries, periapical, periodontal, restoration, crown, implant, impacted, retained_root, fracture, lesion_cyst, bone_loss, other]
+        severity:
+          type: string
+          enum: [mild, moderate, severe]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        description:
+          type: string
+          maxLength: 500
+        bbox:
+          $ref: '#/components/schemas/BBox'
+          nullable: true
+
+    # ===== Validated Vision Output =====
+    ValidatedVisionOutput:
+      type: object
+      required: [data, flags, passed]
+      properties:
+        data:
+          $ref: '#/components/schemas/VisionOutput'
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationFlag'
+        passed:
+          type: boolean
+
+security:
+  - bearerAuth: []
+
+securitySchemes:
+  bearerAuth:
+    type: http
+    scheme: bearer
+    bearerFormat: JWT

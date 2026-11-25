@@ -1,0 +1,62 @@
+2. Add config to public/index.html (in <head> before app.js):
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+    import { getAnalytics, logEvent } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js';
+
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID",
+      measurementId: "G-XXXXXXXXXX"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app);
+    window.firebaseAnalytics = analytics;
+    window.logFirebaseEvent = (name, params) => logEvent(analytics, name, params);
+  </script>
+  Replace config values from Firebase Console → Project Settings → Web App.
+
+  3. Track events in public/app.js:
+  // After successful analysis 
+  if (window.logFirebaseEvent) {
+    window.logFirebaseEvent('xray_analyzed', {
+      xray_type: selectedXrayType,
+      findings_count: result.findings.length,
+      has_urgent: result.findings.some(f => f.urgency === 'urgent')
+    });
+  }
+
+  // On errors
+  window.logFirebaseEvent?.('analysis_error', { error: error.message });
+
+  // On consent given
+  consentCheckbox.addEventListener('change', () => {
+    if (consentCheckbox.checked && window.logFirebaseEvent) {
+      window.logFirebaseEvent('consent_given');
+    }
+  });
+
+4. Add .env vars (optional, for CSP):
+  VITE_FIREBASE_API_KEY=...
+  VITE_FIREBASE_PROJECT_ID=...
+
+  5. Update CSP in server.js if needed:
+  scriptSrc: ["'self'", "https://www.gstatic.com"],
+  connectSrc: ["'self'", "https://www.google-analytics.com", "https://region1.google-analytics.com"],
+
+  Deploy, verify in Firebase Console → Analytics → DebugView.
+
+
+
+
+apiKey: "AIzaSyBQYfiEFKkd-9PtwGBiN9WKZri_hYsCYrA",
+  authDomain: "dental-apps-77834.firebaseapp.com",
+  projectId: "dental-apps-77834",
+  storageBucket: "dental-apps-77834.firebasestorage.app",
+  messagingSenderId: "1023648881577",
+  appId: "1:1023648881577:web:8cef98beb73785bc5242b8",
+  measurementId: "G-XSWFWNKLFV"
